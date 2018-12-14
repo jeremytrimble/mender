@@ -122,6 +122,23 @@ func (d *device) InstallUpdate(image io.ReadCloser, size int64) error {
 		return err
 	}
 
+	// The size of an individual sector tends to be quite small.  Rather than
+	// doing a zillion small writes, do medium-size-ish writes that are still
+	// sector aligned.  (Doing too many small writes can put pressure on the
+	// DMA subsystem (unless writes are able to be coalesced) by requiring large numbers of scatter-gather descriptors to be allocated.)
+	native_ssz := ssz
+
+	// Pick a multiple of the sector size that's around 1 MiB.
+	for ssz < 1*1024*1024 {
+		ssz = ssz * 2 // avoid doing logarithms...
+	}
+
+	log.Infof("native sector size of block device %s is %v, we will write in blocks of %v",
+		inactivePartition,
+		native_ssz,
+		ssz,
+	)
+
 	// allocate buffer based on sector size and provide it for staging
 	// in io.CopyBuffer
 	buf := make([]byte, ssz)
