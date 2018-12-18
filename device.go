@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -74,6 +75,46 @@ func (d *device) SwapPartitions() error {
 	return nil
 }
 
+// chunkedCopy copies data from in to out in chunks of exactly chunkSize
+// bytes.
+// Data is held in memory until chunkSize bytes are available to be written.
+func chunkedCopy(out io.Writer, in io.Reader, chunkSize int64) (total_written int64, err error) {
+	buf := bytes.NewBuffer(make([]byte, 0, chunkSize))
+
+	total_written = 0
+
+	for {
+		buf.Reset()
+
+		// read chunkSize bytes into buf
+		bytesRead, readErr := io.CopyN(buf, in, chunkSize)
+
+		if bytesRead > 0 {
+			// write all of buf to out
+			bytesWritten, writeErr := buf.WriteTo(out)
+
+			total_written += bytesWritten
+
+			if writeErr != nil {
+				return total_written, writeErr
+			}
+
+			if bytesWritten != bytesRead {
+				panic(fmt.Sprintf(
+					"Unexpected short write: attempted %v bytes but only wrote %v",
+					bytesRead,
+					bytesWritten,
+				))
+			}
+		}
+
+		if readErr != nil {
+			// Note: readErr might be io.EOF, still return
+			return total_written, readErr
+		}
+	}
+}
+
 func (d *device) InstallUpdate(image io.ReadCloser, size int64) error {
 
 	log.Debugf("Trying to install update of size: %d", size)
@@ -115,7 +156,7 @@ func (d *device) InstallUpdate(image io.ReadCloser, size int64) error {
 		return syscall.ENOSPC
 	}
 
-	ssz, err := b.SectorSize()
+	native_ssz, err := b.SectorSize()
 	if err != nil {
 		log.Errorf("failed to read sector size of block device %s: %v",
 			inactivePartition, err)
@@ -126,24 +167,20 @@ func (d *device) InstallUpdate(image io.ReadCloser, size int64) error {
 	// doing a zillion small writes, do medium-size-ish writes that are still
 	// sector aligned.  (Doing too many small writes can put pressure on the
 	// DMA subsystem (unless writes are able to be coalesced) by requiring large numbers of scatter-gather descriptors to be allocated.)
-	native_ssz := ssz
+	chunk_size := native_ssz
 
 	// Pick a multiple of the sector size that's around 1 MiB.
-	for ssz < 1*1024*1024 {
-		ssz = ssz * 2 // avoid doing logarithms...
+	for chunk_size < 1*1024*1024 {
+		chunk_size = chunk_size * 2 // avoid doing logarithms...
 	}
 
-	log.Infof("native sector size of block device %s is %v, we will write in blocks of %v",
+	log.Infof("native sector size of block device %s is %v, we will write in chunks of %v",
 		inactivePartition,
 		native_ssz,
-		ssz,
+		chunk_size,
 	)
 
-	// allocate buffer based on sector size and provide it for staging
-	// in io.CopyBuffer
-	buf := make([]byte, ssz)
-
-	w, err := io.CopyBuffer(b, image, buf)
+	w, err := chunkedCopy(b, image, int64(chunk_size))
 	if err != nil {
 		log.Errorf("failed to write image data to device %v: %v",
 			inactivePartition, err)
