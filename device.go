@@ -110,7 +110,11 @@ func chunkedCopy(out io.Writer, in io.Reader, chunkSize int64) (total_written in
 
 		if readErr != nil {
 			// Note: readErr might be io.EOF, still return
-			return total_written, readErr
+
+			if readErr == io.EOF {
+				readErr = nil
+			}
+			return total_written, nil
 		}
 	}
 }

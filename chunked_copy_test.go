@@ -1,10 +1,21 @@
+// Copyright 2018 Northern.tech AS
+//
+//    Licensed under the Apache License, Version 2.0 (the "License");
+//    you may not use this file except in compliance with the License.
+//    You may obtain a copy of the License at
+//
+//        http://www.apache.org/licenses/LICENSE-2.0
+//
+//    Unless required by applicable law or agreed to in writing, software
+//    distributed under the License is distributed on an "AS IS" BASIS,
+//    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//    See the License for the specific language governing permissions and
+//    limitations under the License.
 package main
 
 import (
 	"bytes"
 	"fmt"
-	"io"
-	"log"
 	"strings"
 	"testing"
 )
@@ -17,7 +28,6 @@ type MyWriter struct {
 func (mw *MyWriter) Write(data []byte) (n int, err error) {
 	mw.writtenChunkSizes = append(mw.writtenChunkSizes, len(data))
 	n, err = mw.writtenData.Write(data)
-	log.Printf("mw.Write() called with %v bytes, returning %v %v", len(data), n, err)
 	return
 }
 
@@ -42,8 +52,9 @@ func TestChunkedCopy(t *testing.T) {
 
 	bytes_written, err := chunkedCopy(mw, bytes.NewBuffer(input_bytes), CHUNK_SIZE) // use a strange chunk size just to prove it works
 
-	if err != io.EOF {
-		t.Errorf("chunkedCopy: expected EOF but got: %v", err)
+	// a Copy() routine should return err == nil on EOF.
+	if err != nil {
+		t.Errorf("chunkedCopy: expected err to be nil but got: %v", err)
 	}
 
 	if int(bytes_written) != len(input_bytes) {
